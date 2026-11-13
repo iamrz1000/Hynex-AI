@@ -1,0 +1,293 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+
+    /* Light Mode: Crisp Clean Pure White */
+    --accent-primary: #000000;
+    --accent-secondary: #18181b;
+    --chatgpt-canvas: #ffffff;
+    --chatgpt-sidebar: #ffffff;
+    --chatgpt-surface: #f4f4f5;
+    --chatgpt-border: #e4e4e7;
+    color-scheme: light;
+  }
+
+  .dark {
+    /* Dark Mode: Deep Professional Executive Black */
+    --accent-primary: #ffffff;
+    --accent-secondary: #f4f4f5;
+    --chatgpt-canvas: #09090b;
+    --chatgpt-sidebar: #0c0c0e;
+    --chatgpt-surface: #141416;
+    --chatgpt-border: rgba(255, 255, 255, 0.1);
+    /* iOS & Android Safe Area Inset support */
+    --sat: env(safe-area-inset-top, 0px);
+    --sar: env(safe-area-inset-right, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+    --sal: env(safe-area-inset-left, 0px);
+  }
+
+  /* Full viewport height without dynamic address bar jumps on iOS */
+  html, body {
+    min-height: 100%;
+    min-height: -webkit-fill-available;
+    min-height: 100dvh;
+    -webkit-overflow-scrolling: touch;
+    touch-action: manipulation;
+  }
+
+  body {
+    @apply antialiased text-[#09090b] bg-[#ffffff] dark:bg-[#09090b] dark:text-[#f4f4f5] transition-colors duration-150;
+    font-family: var(--font-sans);
+    letter-spacing: -0.011em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Prevent iOS Safari from auto-zooming on input focus (minimum 16px font-size) */
+  @media screen and (max-width: 768px) {
+    input, textarea, select {
+      font-size: 16px !important;
+    }
+  }
+
+  .tabular-nums,
+  [data-tabular="true"] {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+}
+
+/* Canvas utilities */
+.high-class-canvas {
+  background-color: #ffffff;
+}
+
+.dark .high-class-canvas {
+  background-color: #09090b;
+}
+
+/* Minimalist panels */
+.glass-panel {
+  background: #ffffff;
+  border: 1px solid #e4e4e7;
+}
+
+.dark .glass-panel {
+  background: #111113;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.35);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(156, 163, 175, 0.65);
+}
+
+/* Markdown styling inside messages - increased font size for professional readability */
+.prose-chat {
+  font-size: 1.025rem; /* ~16.4px */
+  line-height: 1.76;
+  color: inherit;
+}
+
+.prose-chat p {
+  margin-bottom: 0.85rem;
+  line-height: 1.78;
+  font-size: 1.025rem;
+}
+
+.prose-chat p:last-child {
+  margin-bottom: 0;
+}
+
+.prose-chat ul, .prose-chat ol {
+  margin-bottom: 0.85rem;
+  padding-left: 1.6rem;
+  font-size: 1.025rem;
+}
+
+.prose-chat ul {
+  list-style-type: disc;
+}
+
+.prose-chat ol {
+  list-style-type: decimal;
+}
+
+.prose-chat li {
+  margin-bottom: 0.35rem;
+  line-height: 1.72;
+}
+
+.prose-chat h1 {
+  font-size: 1.55rem;
+  font-weight: 700;
+  margin-top: 1.35rem;
+  margin-bottom: 0.75rem;
+  letter-spacing: -0.02em;
+  color: inherit;
+}
+
+.prose-chat h2 {
+  font-size: 1.35rem;
+  font-weight: 700;
+  margin-top: 1.25rem;
+  margin-bottom: 0.65rem;
+  letter-spacing: -0.015em;
+  color: inherit;
+}
+
+.prose-chat h3 {
+  font-size: 1.18rem;
+  font-weight: 600;
+  margin-top: 1.1rem;
+  margin-bottom: 0.5rem;
+  color: inherit;
+}
+
+.prose-chat pre {
+  background-color: #050507;
+  color: #f1f5f9;
+  padding: 1.15rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.92rem;
+  line-height: 1.65;
+  margin: 1rem 0;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.prose-chat code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.35rem;
+  background-color: rgba(150, 150, 150, 0.15);
+}
+
+.prose-chat pre code {
+  background-color: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.92rem;
+}
+
+.prose-chat blockquote {
+  border-left: 3.5px solid #10b981;
+  padding-left: 1rem;
+  margin: 0.95rem 0;
+  font-style: italic;
+  opacity: 0.95;
+}
+
+.prose-chat table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.95rem;
+}
+
+.prose-chat th, .prose-chat td {
+  border: 1px solid rgba(150, 150, 150, 0.25);
+  padding: 0.65rem 0.95rem;
+  text-align: left;
+}
+
+.prose-chat th {
+  background-color: rgba(150, 150, 150, 0.1);
+  font-weight: 600;
+}
+
+/* Pulsing audio animation */
+@keyframes voice-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.18); opacity: 0.45; }
+}
+
+.animate-voice-pulse {
+  animation: voice-pulse 1.8s infinite ease-in-out;
+}
+
+/* AI Typing Cursor Blink with Glow */
+@keyframes cursor-blink {
+  0%, 100% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+  50% {
+    opacity: 0.15;
+    transform: scaleY(0.92);
+  }
+}
+
+.animate-cursor-blink {
+  animation: cursor-blink 0.9s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* Smooth Chat & Message Entrance */
+@keyframes chat-entry {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-chat-entry {
+  animation: chat-entry 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Shimmer Scanning for Image Generation */
+@keyframes shimmer-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer-sweep {
+  animation: shimmer-sweep 2s infinite linear;
+}
+
+/* Tab & Section Smooth Fade In */
+@keyframes smooth-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-smooth-in {
+  animation: smooth-fade-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}

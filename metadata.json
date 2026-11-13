@@ -1,0 +1,10 @@
+{
+  "name": "HYNEX AI",
+  "description": "HYNEX AI is a high-performance conversational AI platform with multi-model intelligence, real-time knowledge synthesis, voice duplex, and creative media generation.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

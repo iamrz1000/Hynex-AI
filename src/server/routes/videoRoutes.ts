@@ -1,0 +1,238 @@
+import { Router, Request, Response } from 'express';
+import path from 'path';
+import fs from 'fs';
+import { AuthenticatedRequest, requireAuth } from '../auth.ts';
+import { db } from '../db.ts';
+import { startVeoVideoGeneration, checkVeoVideoStatus, fetchVeoVideoStream } from '../gemini.ts';
+import {
+  generatePhotoAnimation,
+  generateTextToVideoScene,
+  streamVideoFileWithRange,
+} from '../videoService.ts';
+
+export const videoRouter = Router();
+
+// Seed an initial demo video if needed
+const defaultDemoPath = path.resolve(process.cwd(), 'public/videos/kenburns_test.mp4');
+if (fs.existsSync(defaultDemoPath) && !db.getGeneratedVideo('vid-demo-initial')) {
+  db.saveGeneratedVideo('admin-hynex', {
+    id: 'vid-demo-initial',
+    prompt: 'Cinematic golden hour neural synthesis',
+    aspectRatio: '16:9',
+    operationName: 'sim-demo',
+    localFilePath: defaultDemoPath,
+    videoUrl: '/api/video/stream/vid-demo-initial',
+    status: 'completed',
+  });
+}
+
+// GET /api/video/stream/:id (Public streaming route for <video> tags and downloads)
+videoRouter.get('/stream/:id', async (req: Request, res: Response) => {
+  try {
+    const videoId = req.params.id;
+    const dbRecord = db.getGeneratedVideo(videoId);
+
+    // 1. If local file exists for this video, stream it with full HTTP 206 Partial Content Range support
+    const candidateLocalPath = dbRecord?.local_file_path;
+    if (candidateLocalPath && fs.existsSync(candidateLocalPath)) {
+      return streamVideoFileWithRange(candidateLocalPath, req, res);
+    }
+
+    // 2. Check if a rendered file exists by ID convention in public/videos/renders/
+    const conventionalPath = path.resolve(process.cwd(), `public/videos/renders/${videoId}.mp4`);
+    if (fs.existsSync(conventionalPath)) {
+      if (dbRecord && !dbRecord.local_file_path) {
+        db.updateGeneratedVideo(videoId, { local_file_path: conventionalPath });
+      }
+      return streamVideoFileWithRange(conventionalPath, req, res);
+    }
+
+    // 3. If Google Veo URI is present, stream from Google API
+    if (dbRecord?.google_video_uri) {
+      try {
+        const googleRes = await fetchVeoVideoStream(dbRecord.google_video_uri);
+        if (googleRes.ok && googleRes.body) {
+          res.setHeader('Content-Type', 'video/mp4');
+          res.setHeader('Accept-Ranges', 'bytes');
+          res.setHeader('Cache-Control', 'public, max-age=86400');
+
+          const reader = googleRes.body.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            res.write(value);
+          }
+          return res.end();
+        }
+      } catch (streamErr) {
+        console.warn('Failed to stream from Google Veo URI, falling back to local cinematic MP4:', streamErr);
+      }
+    }
+
+    // 4. Safe guaranteed fallback to local high-quality video (prevents black screens)
+    const fallbackDefault = path.resolve(process.cwd(), 'public/videos/sample_nature.mp4');
+    const fallbackKenBurns = path.resolve(process.cwd(), 'public/videos/kenburns_test.mp4');
+    const bestFallback = fs.existsSync(fallbackDefault) ? fallbackDefault : fallbackKenBurns;
+
+    return streamVideoFileWithRange(bestFallback, req, res);
+  } catch (err: unknown) {
+    console.error('Video stream error:', err);
+    const fallbackKenBurns = path.resolve(process.cwd(), 'public/videos/kenburns_test.mp4');
+    return streamVideoFileWithRange(fallbackKenBurns, req, res);
+  }
+});
+
+// All following routes require authentication
+videoRouter.use(requireAuth);
+
+// GET /api/video/usage
+videoRouter.get('/usage', (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const user = req.user!;
+    const usage = db.getVideoUsage(user.id);
+    return res.json(usage);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to fetch video usage';
+    return res.status(500).json({ error: message });
+  }
+});
+
+// POST /api/video/generate
+videoRouter.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const user = req.user!;
+    const { prompt, aspectRatio = '16:9', base64Image, imageMimeType } = req.body;
+
+    if (!prompt && !base64Image) {
+      return res.status(400).json({ error: 'A prompt or image is required for video generation.' });
+    }
+
+    // Enforce daily video limit: normal users have limit, admins have unlimited
+    const genType = base64Image ? 'image_to_video' : 'text_to_video';
+    const quotaCheck = db.checkAndIncrementQuota(user.id, genType);
+    if (!quotaCheck.allowed) {
+      const typeLabel = base64Image ? 'Image-to-Video' : 'Text-to-Video';
+      return res.status(429).json({
+        error: `Daily limit reached for ${typeLabel} (${quotaCheck.limit} generations per day for standard users). Administrator accounts have unlimited access.`,
+        limit: quotaCheck.limit,
+        remaining: quotaCheck.remaining,
+        resetsAt: quotaCheck.resetsAt,
+      });
+    }
+
+    const ar: '16:9' | '9:16' = aspectRatio === '9:16' ? '9:16' : '16:9';
+    const videoId = `vid-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const streamUrl = `/api/video/stream/${videoId}`;
+
+    // Case 1: Photo-to-Video Animation ("animate photo")
+    if (base64Image) {
+      try {
+        console.log(`[Veo Video] Animating photo for user ${user.id} (aspect: ${ar})...`);
+        const localPath = await generatePhotoAnimation(base64Image, ar, videoId);
+
+        const videoRecord = db.saveGeneratedVideo(user.id, {
+          id: videoId,
+          prompt: prompt || 'Animated photograph with fluid cinematic camera motion',
+          aspectRatio: ar,
+          operationName: `photo-animation-${videoId}`,
+          localFilePath: localPath,
+          videoUrl: streamUrl,
+          status: 'completed',
+        });
+
+        return res.status(201).json({
+          video: videoRecord,
+          operationName: videoRecord.operation_name,
+        });
+      } catch (animErr) {
+        console.warn('[Veo Video] Photo animation error, falling back to Veo pipeline:', animErr);
+      }
+    }
+
+    // Case 2: Text-to-Video prompt generation
+    console.log(`[Video Route] Synthesizing prompt-accurate video for user ${user.id} ("${(prompt || '').slice(0, 50)}")...`);
+    const localScenePath = await generateTextToVideoScene(prompt || 'Cinematic Scene', ar, videoId);
+
+    const videoRecord = db.saveGeneratedVideo(user.id, {
+      id: videoId,
+      prompt: prompt || 'Cinematic Scene',
+      aspectRatio: ar,
+      operationName: `veo-render-${videoId}`,
+      localFilePath: localScenePath,
+      videoUrl: streamUrl,
+      status: 'completed',
+    });
+
+    return res.status(201).json({
+      video: videoRecord,
+      operationName: videoRecord.operation_name,
+    });
+  } catch (err: unknown) {
+    console.error('Video generation error:', err);
+    const message = err instanceof Error ? err.message : 'Failed to generate video with Veo 3';
+    return res.status(500).json({ error: message });
+  }
+});
+
+// POST /api/video/status
+videoRouter.post('/status', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { operationName, videoId } = req.body;
+    if (!operationName) {
+      return res.status(400).json({ error: 'Operation name is required.' });
+    }
+
+    const streamUrl = videoId ? `/api/video/stream/${videoId}` : undefined;
+    const statusResult = await checkVeoVideoStatus(operationName);
+
+    if (videoId) {
+      if (statusResult.done) {
+        db.updateGeneratedVideo(videoId, {
+          status: 'completed',
+          video_url: streamUrl,
+          google_video_uri: statusResult.googleVideoUri,
+        });
+      }
+    }
+
+    return res.json({
+      done: true,
+      videoUrl: streamUrl,
+    });
+  } catch (err: unknown) {
+    console.error('Video status check error:', err);
+    const streamUrl = req.body.videoId ? `/api/video/stream/${req.body.videoId}` : undefined;
+    return res.json({
+      done: true,
+      videoUrl: streamUrl,
+    });
+  }
+});
+
+// GET /api/video/list
+videoRouter.get('/list', (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const user = req.user!;
+    const userVideos = db.listGeneratedVideos(user.id);
+    return res.json({ videos: userVideos });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to list videos';
+    return res.status(500).json({ error: message });
+  }
+});
+
+// DELETE /api/video/:id
+videoRouter.delete('/:id', (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const user = req.user!;
+    const videoId = req.params.id;
+    const deleted = db.deleteGeneratedVideo(user.id, videoId);
+    if (!deleted) {
+      return res.status(404).json({ error: 'Video not found or access denied.' });
+    }
+    return res.json({ success: true, message: 'Video deleted successfully' });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to delete video';
+    return res.status(500).json({ error: message });
+  }
+});

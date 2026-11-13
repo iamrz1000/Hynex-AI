@@ -1,0 +1,354 @@
+name: Build and Publish Debug APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Temurin Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Verify Java environment
+        run: |
+          echo "=== Java Environment Verification ==="
+          java -version
+          echo "JAVA_HOME=$JAVA_HOME"
+          if [ -z "$JAVA_HOME" ]; then
+            echo "::error::JAVA_HOME is not set."
+            exit 1
+          fi
+
+          JAVA_RAW_VERSION=$(java -version 2>&1 | head -n 1)
+          echo "Java Raw Version String: $JAVA_RAW_VERSION"
+
+          JAVA_MAJOR=$(java -version 2>&1 | awk -F '"' '/version/ {print $2}' | awk -F '.' '{print $1}')
+          if [ -z "$JAVA_MAJOR" ]; then
+            echo "::error::Could not detect Java major version."
+            exit 1
+          fi
+
+          echo "Detected Active Java Major Version: $JAVA_MAJOR"
+          if [ "$JAVA_MAJOR" -lt 17 ]; then
+            echo "::error::Active Java major version ($JAVA_MAJOR) is lower than 17."
+            exit 1
+          fi
+          echo "Java environment verified successfully: Java $JAVA_MAJOR >= 17"
+
+      - name: Set up Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Create temporary debug keystore
+        run: |
+          echo "=== Temporary Debug Keystore Check ==="
+          if [ -f ./debug.keystore ]; then
+            echo "Temporary debug keystore already exists."
+          else
+            echo "Generating temporary debug keystore using Java 17 keytool..."
+            keytool -genkey -v \
+              -keystore ./debug.keystore \
+              -alias androiddebugkey \
+              -storepass android \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+          if [ ! -f ./debug.keystore ]; then
+            echo "::error::Failed to verify ./debug.keystore creation."
+            exit 1
+          fi
+          echo "Temporary debug keystore confirmed present and verified."
+
+      - name: Build the debug APK
+        run: |
+          echo "=== Building Debug APK ==="
+          gradle :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Verify the APK
+        run: |
+          echo "=== Verifying APK Existence and Integrity ==="
+          EXPECTED_APK="app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$EXPECTED_APK" ]; then
+            echo "Primary debug APK not found at: $EXPECTED_APK"
+            echo "Inspecting app/build/outputs/apk directory..."
+            if [ -d "app/build/outputs/apk" ]; then
+              find app/build/outputs/apk -maxdepth 4 -name "*.apk"
+            fi
+            echo "::error::Expected debug APK not found at $EXPECTED_APK"
+            exit 1
+          fi
+
+          if [ ! -f "$EXPECTED_APK" ]; then
+            echo "::error::$EXPECTED_APK is not a regular file."
+            exit 1
+          fi
+
+          if [ ! -s "$EXPECTED_APK" ]; then
+            echo "::error::$EXPECTED_APK is empty (0 bytes)."
+            exit 1
+          fi
+
+          case "$EXPECTED_APK" in
+            *.apk) ;;
+            *) echo "::error::$EXPECTED_APK does not have .apk extension."; exit 1 ;;
+          esac
+
+          APK_SIZE=$(stat -c%s "$EXPECTED_APK")
+          echo "Verified debug APK: $EXPECTED_APK ($APK_SIZE bytes)"
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Prepare APK release asset
+        id: prepare_asset
+        run: |
+          echo "=== Preparing Multi-Platform Release Assets ==="
+          TMP_DIR=$(mktemp -d -t hynex-release-XXXXXX)
+          echo "Created runner temporary directory: $TMP_DIR"
+
+          # 1. Android APK
+          ASSET_FILENAME="Hynex-AI-debug-build-${{ github.run_number }}.apk"
+          TARGET_ASSET_PATH="${TMP_DIR}/${ASSET_FILENAME}"
+          cp -p "app/build/outputs/apk/debug/app-debug.apk" "$TARGET_ASSET_PATH"
+
+          if [ ! -f "$TARGET_ASSET_PATH" ] || [ ! -s "$TARGET_ASSET_PATH" ]; then
+            echo "::error::Failed to create valid release asset at $TARGET_ASSET_PATH"
+            exit 1
+          fi
+
+          # 2. Windows, macOS & iOS packages via Python packager
+          python3 -c "
+          import os, zipfile, shutil
+
+          tmp = '$TMP_DIR'
+          run_num = '${{ github.run_number }}'
+
+          # Windows Package
+          win_dir = os.path.join(tmp, 'Hynex-AI-Windows')
+          os.makedirs(win_dir, exist_ok=True)
+          with open(os.path.join(win_dir, 'Launch HYNEX AI.cmd'), 'w', newline='\r\n') as f:
+              f.write('@echo off\r\necho Launching HYNEX AI Desktop App...\r\nstart msedge --app=https://ais-dev-mqjb24gonk6zghybggwc5j-190037377446.asia-east1.run.app || start chrome --app=https://ais-dev-mqjb24gonk6zghybggwc5j-190037377446.asia-east1.run.app || start https://ais-dev-mqjb24gonk6zghybggwc5j-190037377446.asia-east1.run.app\r\n')
+          with open(os.path.join(win_dir, 'README.txt'), 'w', newline='\r\n') as f:
+              f.write('HYNEX AI for Windows 10 & 11\r\n\r\n1. Double-click \"Launch HYNEX AI.cmd\" to run HYNEX AI in an isolated desktop window.\r\n2. Right-click the file and select \"Pin to Start\" or \"Pin to taskbar\" for instant access.\r\n')
+          if os.path.exists('public/hynex-logo.jpg'):
+              shutil.copy('public/hynex-logo.jpg', os.path.join(win_dir, 'hynex-logo.jpg'))
+
+          win_zip = os.path.join(tmp, f'Hynex-AI-Windows-build-{run_num}.zip')
+          with zipfile.ZipFile(win_zip, 'w', zipfile.ZIP_DEFLATED) as z:
+              for root, dirs, files in os.walk(win_dir):
+                  for file in files:
+                      p = os.path.join(root, file)
+                      z.write(p, os.path.relpath(p, win_dir))
+
+          # macOS Package
+          mac_dir = os.path.join(tmp, 'Hynex-AI-macOS', 'Hynex AI.app', 'Contents', 'MacOS')
+          os.makedirs(mac_dir, exist_ok=True)
+          launcher = os.path.join(mac_dir, 'Hynex AI')
+          with open(launcher, 'w') as f:
+              f.write('#!/bin/bash\nopen -n -a \"Google Chrome\" --args \"--app=https://ais-dev-mqjb24gonk6zghybggwc5j-190037377446.asia-east1.run.app\" 2>/dev/null || open \"https://ais-dev-mqjb24gonk6zghybggwc5j-190037377446.asia-east1.run.app\"\n')
+          os.chmod(launcher, 0o755)
+
+          plist = os.path.join(tmp, 'Hynex-AI-macOS', 'Hynex AI.app', 'Contents', 'Info.plist')
+          with open(plist, 'w') as f:
+              f.write('<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>CFBundleExecutable</key><string>Hynex AI</string>\n  <key>CFBundleIdentifier</key><string>com.hynex.ai</string>\n  <key>CFBundleName</key><string>Hynex AI</string>\n  <key>CFBundlePackageType</key><string>APPL</string>\n  <key>CFBundleShortVersionString</key><string>1.0</string>\n</dict>\n</plist>\n')
+
+          mac_zip = os.path.join(tmp, f'Hynex-AI-macOS-build-{run_num}.zip')
+          mac_root = os.path.join(tmp, 'Hynex-AI-macOS')
+          with zipfile.ZipFile(mac_zip, 'w', zipfile.ZIP_DEFLATED) as z:
+              for root, dirs, files in os.walk(mac_root):
+                  for file in files:
+                      p = os.path.join(root, file)
+                      z.write(p, os.path.relpath(p, mac_root))
+
+          # iOS WebClip Profile
+          ios_path = os.path.join(tmp, f'Hynex-AI-iOS-build-{run_num}.mobileconfig')
+          with open(ios_path, 'w') as f:
+              f.write('''<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+          <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
+          <plist version=\"1.0\">
+          <dict>
+            <key>PayloadDisplayName</key><string>HYNEX AI</string>
+            <key>PayloadDescription</key><string>HYNEX AI Native Home Screen App for iPhone and iPad</string>
+            <key>PayloadIdentifier</key><string>com.hynex.ai.webclip</string>
+            <key>PayloadOrganization</key><string>HYNEX AI</string>
+            <key>PayloadType</key><string>Configuration</string>
+            <key>PayloadUUID</key><string>9B67C924-1188-4FDF-A45A-8E9DE694E4E1</string>
+            <key>PayloadVersion</key><integer>1</integer>
+            <key>PayloadContent</key>
+            <array>
+              <dict>
+                <key>PayloadType</key><string>com.apple.webClip.managed</string>
+                <key>PayloadVersion</key><integer>1</integer>
+                <key>PayloadIdentifier</key><string>com.hynex.ai.webclip.entry</string>
+                <key>PayloadUUID</key><string>8A56B813-2299-4ECE-B34B-7D8CD583E3D0</string>
+                <key>PayloadDisplayName</key><string>HYNEX AI</string>
+                <key>URL</key><string>https://ais-dev-mqjb24gonk6zghybggwc5j-190037377446.asia-east1.run.app</string>
+                <key>Label</key><string>HYNEX AI</string>
+                <key>IsRemovable</key><true/>
+                <key>FullScreen</key><true/>
+                <key>Precomposed</key><true/>
+              </dict>
+            </array>
+          </dict>
+          </plist>''')
+          "
+
+          WIN_ASSET_FILENAME="Hynex-AI-Windows-build-${{ github.run_number }}.zip"
+          MAC_ASSET_FILENAME="Hynex-AI-macOS-build-${{ github.run_number }}.zip"
+          IOS_ASSET_FILENAME="Hynex-AI-iOS-build-${{ github.run_number }}.mobileconfig"
+
+          WIN_ASSET_PATH="${TMP_DIR}/${WIN_ASSET_FILENAME}"
+          MAC_ASSET_PATH="${TMP_DIR}/${MAC_ASSET_FILENAME}"
+          IOS_ASSET_PATH="${TMP_DIR}/${IOS_ASSET_FILENAME}"
+
+          echo "Multi-platform release assets prepared:"
+          echo "Android APK: $ASSET_FILENAME ($(stat -c%s "$TARGET_ASSET_PATH") bytes)"
+          echo "Windows: $WIN_ASSET_FILENAME ($(stat -c%s "$WIN_ASSET_PATH") bytes)"
+          echo "macOS: $MAC_ASSET_FILENAME ($(stat -c%s "$MAC_ASSET_PATH") bytes)"
+          echo "iOS: $IOS_ASSET_FILENAME ($(stat -c%s "$IOS_ASSET_PATH") bytes)"
+
+          echo "asset_path=$TARGET_ASSET_PATH" >> "$GITHUB_OUTPUT"
+          echo "asset_filename=$ASSET_FILENAME" >> "$GITHUB_OUTPUT"
+          echo "win_asset_path=$WIN_ASSET_PATH" >> "$GITHUB_OUTPUT"
+          echo "win_asset_filename=$WIN_ASSET_FILENAME" >> "$GITHUB_OUTPUT"
+          echo "mac_asset_path=$MAC_ASSET_PATH" >> "$GITHUB_OUTPUT"
+          echo "mac_asset_filename=$MAC_ASSET_FILENAME" >> "$GITHUB_OUTPUT"
+          echo "ios_asset_path=$IOS_ASSET_PATH" >> "$GITHUB_OUTPUT"
+          echo "ios_asset_filename=$IOS_ASSET_FILENAME" >> "$GITHUB_OUTPUT"
+
+      - name: Publish APK to GitHub Releases
+        id: publish_release
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "=== Publishing Multi-Platform Assets to GitHub Releases ==="
+          gh --version
+
+          ASSET_PATH="${{ steps.prepare_asset.outputs.asset_path }}"
+          WIN_ASSET_PATH="${{ steps.prepare_asset.outputs.win_asset_path }}"
+          MAC_ASSET_PATH="${{ steps.prepare_asset.outputs.mac_asset_path }}"
+          IOS_ASSET_PATH="${{ steps.prepare_asset.outputs.ios_asset_path }}"
+
+          ASSET_FILENAME="${{ steps.prepare_asset.outputs.asset_filename }}"
+          WIN_FILENAME="${{ steps.prepare_asset.outputs.win_asset_filename }}"
+          MAC_FILENAME="${{ steps.prepare_asset.outputs.mac_asset_filename }}"
+          IOS_FILENAME="${{ steps.prepare_asset.outputs.ios_asset_filename }}"
+
+          RELEASE_TAG="debug-apk-build-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          RELEASE_TITLE="Hynex AI Debug Build #${{ github.run_number }}"
+
+          {
+            echo "### Hynex AI — Multi-Platform Release Downloads"
+            echo ""
+            echo "#### Release Overview"
+            echo "- **Application**: Hynex AI"
+            echo "- **Build**: Run #$GITHUB_RUN_NUMBER (Attempt #$GITHUB_RUN_ATTEMPT)"
+            echo "- **Commit SHA**: \`$GITHUB_SHA\`"
+            echo "- **Supported Platforms**: Android, Windows, macOS, iOS"
+            echo ""
+            echo "---"
+            echo ""
+            echo "#### 📥 Dedicated Platform Downloads (Select Your Device Below)"
+            echo ""
+            echo "1. 🤖 **Android (Compiled APK Package)**"
+            echo "   - **File**: \`$ASSET_FILENAME\`"
+            echo "   - Download and tap to install the verified standalone debug APK on Android devices."
+            echo ""
+            echo "2. 🪟 **Windows (10 / 11 Desktop Application)**"
+            echo "   - **File**: \`$WIN_FILENAME\`"
+            echo "   - Extract ZIP and double-click \`Launch HYNEX AI.cmd\` to run as a borderless desktop app with Taskbar and Start Menu pinning."
+            echo ""
+            echo "3. 🍎 **macOS (Mac Desktop App Bundle)**"
+            echo "   - **File**: \`$MAC_FILENAME\`"
+            echo "   - Extract ZIP to get \`Hynex AI.app\`, drag it into your \`/Applications\` folder, and launch directly from your Dock."
+            echo ""
+            echo "4. 📱 **iOS (iPhone & iPad WebClip Profile)**"
+            echo "   - **File**: \`$IOS_FILENAME\`"
+            echo "   - Download in Safari on your iPhone/iPad, open **Settings ➔ Profile Downloaded**, and tap **Install** to add HYNEX AI to your Home Screen with safe-area notch support."
+          } > release_notes.md
+
+          echo "Creating GitHub Release with tag: $RELEASE_TAG and attaching 4 platform packages..."
+          gh release create "$RELEASE_TAG" \
+            "$ASSET_PATH" \
+            "$WIN_ASSET_PATH" \
+            "$MAC_ASSET_PATH" \
+            "$IOS_ASSET_PATH" \
+            --target "$GITHUB_SHA" \
+            --title "$RELEASE_TITLE" \
+            --notes-file release_notes.md \
+            --latest
+
+          echo "Release created successfully."
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "release_title=$RELEASE_TITLE" >> "$GITHUB_OUTPUT"
+
+      - name: Report APK download result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "=== Reporting Multi-Platform Build & Download Status ==="
+          RELEASE_TAG="debug-apk-build-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          RELEASE_TITLE="Hynex AI Debug Build #${{ github.run_number }}"
+          ASSET_FILENAME="${{ steps.prepare_asset.outputs.asset_filename }}"
+          WIN_FILENAME="${{ steps.prepare_asset.outputs.win_asset_filename }}"
+          MAC_FILENAME="${{ steps.prepare_asset.outputs.mac_asset_filename }}"
+          IOS_FILENAME="${{ steps.prepare_asset.outputs.ios_asset_filename }}"
+
+          if [ "${{ steps.publish_release.outcome }}" = "success" ]; then
+            echo "GitHub Release publishing succeeded!"
+            RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}"
+            echo "Release Tag: $RELEASE_TAG"
+            echo "Release Title: $RELEASE_TITLE"
+            echo "Release URL: $RELEASE_URL"
+
+            gh release view "$RELEASE_TAG" || true
+
+            echo "### 🚀 Hynex AI Multi-Platform Release Succeeded" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "- **App**: Hynex AI" >> "$GITHUB_STEP_SUMMARY"
+            echo "- **Release Tag**: \`$RELEASE_TAG\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- **Release Title**: $RELEASE_TITLE" >> "$GITHUB_STEP_SUMMARY"
+            echo "- **GitHub Release Page**: [View Release and Download Packages]($RELEASE_URL)" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "#### Available Downloads:" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 🤖 **Android**: \`$ASSET_FILENAME\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 🪟 **Windows**: \`$WIN_FILENAME\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 🍎 **macOS**: \`$MAC_FILENAME\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 📱 **iOS**: \`$IOS_FILENAME\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::GitHub Release publishing did not complete or encountered an error."
+            echo "The debug APK was built successfully and is preserved as an Actions artifact."
+            echo "Actions artifact name: app-debug-apk"
+
+            echo "### ⚠️ Hynex AI Multi-Platform Build Succeeded (Release Notice)" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "- **APK Build Result**: Succeeded" >> "$GITHUB_STEP_SUMMARY"
+            echo "- **Actions Artifact**: \`app-debug-apk\` (Available in the Summary tab of this workflow run)" >> "$GITHUB_STEP_SUMMARY"
+            echo "- **Notice**: Release publishing could not be completed via GitHub CLI. You can download the verified APK directly from the **Artifacts** section of this GitHub Actions run." >> "$GITHUB_STEP_SUMMARY"
+          fi

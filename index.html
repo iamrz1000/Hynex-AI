@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>HYNEX AI</title>
+    <meta name="theme-color" content="#181818" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="HYNEX AI" />
+    <meta name="application-name" content="HYNEX AI" />
+    <meta name="description" content="HYNEX AI is a high-performance conversational AI platform with multi-model intelligence, real-time knowledge synthesis, voice duplex, and creative media generation." />
+    <meta property="og:title" content="HYNEX AI" />
+    <meta property="og:description" content="HYNEX AI is a high-performance conversational AI platform with multi-model intelligence, real-time knowledge synthesis, voice duplex, and creative media generation." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/jpeg" href="/hynex-logo.jpg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem('hynex_theme') || localStorage.getItem('think_ai_theme') || localStorage.getItem('nextgen_theme');
+          if (saved === 'light') {
+            document.documentElement.classList.remove('dark');
+            document.documentElement.classList.add('light');
+            document.documentElement.style.colorScheme = 'light';
+          } else {
+            document.documentElement.classList.add('dark');
+            document.documentElement.classList.remove('light');
+            document.documentElement.style.colorScheme = 'dark';
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <script>
+      (function () {
+        // Ensure window.fetch is writable and configurable with a setter so browser extensions
+        // (such as Urban VPN, translators, or network interceptors) do not throw
+        // "TypeError: Cannot set property fetch of #<Window> which has only a getter"
+        try {
+          var _nativeFetch = window.fetch;
+          Object.defineProperty(window, 'fetch', {
+            get: function () {
+              return _nativeFetch;
+            },
+            set: function (newFetch) {
+              _nativeFetch = newFetch;
+            },
+            configurable: true,
+            enumerable: true,
+          });
+        } catch (err) {
+          // Fallback if property is non-configurable
+        }
+
+        // Suppress unhandled errors originating from external browser extensions or Vite HMR in container
+        window.addEventListener('error', function (event) {
+          var file = (event && event.filename) || '';
+          var msg = (event && (event.message || '')) || '';
+          var errStr = (event && event.error && (event.error.message || event.error.stack || String(event.error))) || '';
+          var fullText = file + ' ' + msg + ' ' + errStr;
+          if (
+            fullText.indexOf('chrome-extension://') !== -1 ||
+            fullText.indexOf('moz-extension://') !== -1 ||
+            fullText.indexOf('safari-extension://') !== -1 ||
+            fullText.indexOf('@vite/client') !== -1 ||
+            fullText.indexOf('closed without opened') !== -1 ||
+            fullText.indexOf('WebSocket closed') !== -1 ||
+            (fullText.indexOf('[vite]') !== -1 && fullText.indexOf('WebSocket') !== -1)
+          ) {
+            event.stopImmediatePropagation();
+            event.preventDefault();
+            return true;
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function (event) {
+          var reason = (event && event.reason) || '';
+          var stack = (reason && (reason.stack || reason.message || String(reason))) || '';
+          if (
+            stack.indexOf('chrome-extension://') !== -1 ||
+            stack.indexOf('moz-extension://') !== -1 ||
+            stack.indexOf('safari-extension://') !== -1 ||
+            stack.indexOf('@vite/client') !== -1 ||
+            stack.indexOf('closed without opened') !== -1 ||
+            stack.indexOf('WebSocket closed') !== -1 ||
+            (stack.indexOf('[vite]') !== -1 && stack.indexOf('WebSocket') !== -1)
+          ) {
+            event.stopImmediatePropagation();
+            event.preventDefault();
+            return true;
+          }
+        }, true);
+
+        // Suppress console.error for Vite HMR closed without opened
+        var _originalConsoleError = console.error;
+        console.error = function () {
+          var text = Array.prototype.slice.call(arguments).map(function (a) {
+            if (!a) return '';
+            if (a instanceof Error) return (a.message || '') + ' ' + (a.stack || '');
+            if (typeof a === 'object') {
+              try { return JSON.stringify(a); } catch (e) { return String(a); }
+            }
+            return String(a);
+          }).join(' ');
+
+          if (
+            text.indexOf('closed without opened') !== -1 ||
+            text.indexOf('WebSocket closed') !== -1 ||
+            (text.indexOf('[vite]') !== -1 && text.indexOf('WebSocket') !== -1)
+          ) {
+            return;
+          }
+          _originalConsoleError.apply(console, arguments);
+        };
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
